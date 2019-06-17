@@ -58,12 +58,11 @@ Unit=update-leap.service
 [Install]
 WantedBy=multi-user.target
 EOF";
-
     sync;
-    echo -e "\e[36m-Get initial leap file and making sure timer and service can run\e[0m";
+    echo -e "\e[36m-Get initial leap file making sure timer and service can run\e[0m";
     wget -O /var/lib/ntp/leap-seconds.list http://www.ietf.org/timezones/data/leap-seconds.list;
-    chmod +x /usr/local/bin/update-leap;
-    sudo /usr/local/bin/update-leap;
+    # Telling NTP where the leapseconds file is
+    echo "leapfile /var/lib/ntp/leap-seconds.list" | tee -a /etc/ntp.conf;
     sudo systemctl daemon-reload;
     sudo systemctl enable update-leap.timer;
     sudo systemctl enable update-leap.service;
@@ -76,6 +75,7 @@ EOF";
 #################################################################################################################
 ## Main Routine                                                                                                 #
 #################################################################################################################
+
 main() {
 # Install NTP tools
 install_ntp_tools;
