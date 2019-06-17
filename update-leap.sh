@@ -25,7 +25,7 @@ install_ntp() {
     sudo systemctl daemon-reload;
     sudo systemctl enable ntp.service;
     sudo systemctl start ntp.service;
-    /usr/bin/logger 'install_ntp()' -t 'Stratum1 NTP Server';
+    /usr/bin/logger 'install_ntp()' -t 'NTP Server';
 }
 
 configure_update_leap() {
@@ -89,7 +89,7 @@ disable_timesyncd() {
     sudo systemctl stop systemd-timesyncd
     sudo systemctl daemon-reload
     sudo systemctl disable systemd-timesyncd
-    /usr/bin/logger 'disable_timesyncd()' -t 'Stratum1 NTP Server';
+    /usr/bin/logger 'disable_timesyncd()' -t 'NTP Server';
 }
 
 configure_dhcp_ntp() {
@@ -106,7 +106,7 @@ configure_dhcp_ntp() {
     sudo sed -i -e "s/option ntp_servers/#option ntp_servers/" /etc/dhcpcd.conf;
     ## restart NTPD yet again after cleaning up DHCP
     sudo systemctl restart ntp
-    /usr/bin/logger 'configure_dhcp()' -t 'Stratum1 NTP Server';
+    /usr/bin/logger 'configure_dhcp()' -t 'NTP Server';
 }
 
 #################################################################################################################
