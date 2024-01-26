@@ -18,21 +18,106 @@
 #####################################################################
 
 install_ntp() {
-    echo -e "\e[32minstall_ntp()\e[0m";
+    /usr/bin/logger 'install_ntp()' -t 'Stratum1 NTP Server';
+    echo -e "\e[32m - install_ntp()\e[0m";
     export DEBIAN_FRONTEND=noninteractive;
-    sudo apt-get update;
-    sudo apt-get -y install ntp;
-    sudo systemctl daemon-reload;
-    sudo systemctl enable ntp.service;
-    sudo systemctl start ntp.service;
-    /usr/bin/logger 'install_ntp()' -t 'NTP Server';
+    echo -e "\e[36m ... installing ntp\e[0m";
+    apt-get -qq -y install ntp > /dev/null 2>&1;
+    /usr/bin/logger 'install_ntp() finished' -t 'Stratum1 NTP Server';
+    echo -e "\e[32m - install_ntp() finished\e[0m";
 }
 
-configure_update_leap() {
-    echo -e "\e[32mconfigure_update-leap()\e[0m";
-    echo -e "\e[36m-Creating service unit file\e[0m";
+configure_ntp() {
+    echo -e "\e[32m - configure_ntp()\e[0m";
+    echo -e "\e[36m ... stopping ntp.service\e[0m";
+    systemctl stop ntp.service > /dev/null 2>&1;
 
-    sudo sh -c "cat << EOF  > /lib/systemd/system/update-leap.service
+    echo -e "\e[36m ... updating ntp.service\e[0m";
+    echo -e "\e[36m ... adding \e[35mRequires gpsd.service\e[36m to ntp.service\e[0m";
+    sed -i "/After=/a Requires=gpsd.service" /lib/systemd/system/ntp.service > /dev/null 2>&1;
+    echo -e "\e[36m ... creating new ntp.conf\e[0m";
+    cat << __EOF__  > /etc/ntpsec/ntp.conf
+##################################################
+#
+# GPS / PPS Disciplined NTP Server @ stratum-1
+#      /etc/ntpsec/ntp.conf
+#
+##################################################
+
+driftfile /var/lib/ntpsec/ntp.drift
+
+# Statistics will be logged. Comment out next line to disable
+statsdir /var/log/ntpstats/
+statistics loopstats peerstats clockstats
+filegen  loopstats  file loopstats  type week  enable
+filegen  peerstats  file peerstats  type week  enable
+filegen  clockstats  file clockstats  type week  enable
+
+# Separate logfile for NTPD
+logfile /var/log/ntpd/ntpd.log
+logconfig =syncevents +peerevents +sysevents +allclock
+
+server	$NTP_SERVER_1	iburst
+server	$NTP_SERVER_2	iburst
+server	$NTP_SERVER_3	iburst
+server	$NTP_SERVER_4	iburst
+server	$NTP_SERVER_5	iburst
+
+# Access control configuration; see /usr/share/doc/ntp-doc/html/accopt.html for
+# details.  The web page <http://support.ntp.org/bin/view/Support/AccessRestrictions>
+# might also be helpful.
+#
+# Note that restrict applies to both servers and clients, so a configuration
+# that might be intended to block requests from certain clients could also end
+# up blocking replies from your own upstream servers.
+
+# By default, exchange time with everybody, but do not allow configuration.
+restrict -4 default kod notrap nomodify nopeer noquery
+restrict -6 default kod notrap nomodify nopeer noquery
+
+# Local users may interrogate the ntp server more closely.
+restrict 127.0.0.1
+restrict ::1
+
+# Clients from this (example!) subnet have unlimited access, but only if
+# cryptographically authenticated.
+#restrict $RESTRICT_NET mask $NET_MASK $TRUST_NET
+
+# If you want to provide time to your local subnet, change the next line.
+# (Again, the address is an example only.)
+#broadcast $BROADCAST_ADDR
+
+# If you want to listen to time broadcasts on your local subnet, de-comment the
+# next lines.  Please do this only if you trust everybody on the network!
+#disable auth
+#broadcastclient
+#leap file location
+leapfile $LEAPFILE_DIR
+__EOF__
+
+    # Create directory for logfiles and let ntp own it
+    echo -e "\e[36m ... Create directory for logfiles and let ntp own it\e[0m";
+    mkdir -p /var/log/ntpd > /dev/null 2>&1;
+    mkdir -p /var/log/ntpstats > /dev/null 2>&1;
+    chown ntpsec:ntpsec /var/log/ntpd > /dev/null 2>&1;
+    chown ntpsec:ntpsec /var/log/ntpstats > /dev/null 2>&1;   
+    sync;
+    ## Restart NTPD
+    systemctl daemon-reload > /dev/null 2>&1;
+    systemctl restart ntp.service > /dev/null 2>&1;
+    echo -e "\e[32m - configure_ntp() finished\e[0m";
+    /usr/bin/logger 'configure_ntp() finished' -t 'Stratum1 NTP Server';
+}
+
+
+configure_update_leap() {
+    echo -e "\e[32m - configure_update-leap()\e[0m";
+    /usr/bin/logger 'configure_update-leap()' -t 'Stratum1 NTP Server';
+    echo -e "\e[36m ... Getting initial leap-seconds.list from IANA\e[0m";
+    wget $LEAPFILE_URL -O /var/lib/ntpsec/leap-seconds.list > /dev/null 2>&1;
+    chown -R ntpsec:ntpsec /var/lib/ntpsec/leap-seconds.list > /dev/null 2>&1;
+    echo -e "\e[36m ... Creating update-leap.service unit file\e[0m";
+    cat << __EOF__  > /lib/systemd/system/update-leap.service
 # service file running update-leap
 # triggered by update-leap.timer
 
@@ -41,18 +126,18 @@ Description=service file running update-leap
 Documentation=man:update-leap
 
 [Service]
-User=ntp
-Group=ntp
-ExecStart=-/usr/bin/update-leap -F -f /etc/ntp.conf -s http://www.ietf.org/timezones/data/leap-seconds.list /var/lib/ntp/leap-seconds.list
-WorkingDirectory=/var/lib/ntp/
+User=ntpsec
+Group=ntpsec
+ExecStart=-/usr/sbin/ntpleapfetch -s $LEAPFILE_URL -f /etc/ntpsec/ntp.conf -l
+WorkingDirectory=/var/lib/ntpsec/
 
 [Install]
 WantedBy=multi-user.target
-EOF";
+__EOF__
 
-   echo -e "\e[36m-creating timer unit file\e[0m";
+   echo -e "\e[36m ... creating timer unit file\e[0m";
 
-   sudo sh -c "cat << EOF  > /lib/systemd/system/update-leap.timer
+   cat << __EOF__  > /lib/systemd/system/update-leap.timer
 # runs update-leap Weekly.
 [Unit]
 Description=Weekly job to check for updated leap-seconds.list file
@@ -68,20 +153,20 @@ Unit=update-leap.service
 
 [Install]
 WantedBy=multi-user.target
-EOF";
+__EOF__
+
     sync;
-    
-    echo -e "\e[36m-Get initial leap file making sure timer and service can run\e[0m";
-    wget -O /var/lib/ntp/leap-seconds.list http://www.ietf.org/timezones/data/leap-seconds.list;
-    # Telling NTP where the leapseconds file is
-    echo "leapfile /var/lib/ntp/leap-seconds.list" | tee -a /etc/ntp.conf;
-    sudo systemctl daemon-reload;
-    sudo systemctl enable update-leap.timer;
-    sudo systemctl enable update-leap.service;
-    sudo systemctl daemon-reload;
-    sudo systemctl start update-leap.timer;
-    sudo systemctl start update-leap.service;
-    /usr/bin/logger 'configure_update-leap()' -t 'update-leap';
+    echo -e "\e[36m ... downloading leap file and making sure timer and service will run\e[0m";
+    chown -R ntpsec:ntpsec /var/lib/ntpsec > /dev/null 2>&1;
+    systemctl daemon-reload > /dev/null 2>&1;
+    echo -e "\e[36m ... enabling update-leap timer and service\e[0m";
+    systemctl enable update-leap.timer > /dev/null 2>&1;
+    systemctl enable update-leap.service > /dev/null 2>&1;
+    echo -e "\e[36m ... starting timer and service to download leap-file\e[0m";
+    systemctl start update-leap.timer > /dev/null 2>&1;
+    systemctl start update-leap.service > /dev/null 2>&1;
+    echo -e "\e[32m - configure_update-leap() finished\e[0m";
+    /usr/bin/logger 'configure_update-leap() finished' -t 'Stratum1 NTP Server';
 }
 
 disable_timesyncd() {
@@ -114,6 +199,15 @@ configure_dhcp_ntp() {
 #################################################################################################################
 
 main() {
+    
+    # Directory of script
+    export SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+    
+    # Configure environment from .env file
+    set -a; source $SCRIPT_DIR/.env;
+    echo -e "\e[1;36m....env file version $ENV_VERSION used\e[0m"
+
+
     # Install NTP
     install_ntp;
 
@@ -125,6 +219,9 @@ main() {
 
     # Ensure that DHCP does not affect ntp - do make sure that valid ntp servers are configured in ntp.conf
     configure_dhcp_ntp:
+
+    # Create and configure ntpsec with sane defaults 4+ servers
+    configure_ntp;
 
     # Create and configure systemd unit files to update leapseconds file
     configure_update_leap;
